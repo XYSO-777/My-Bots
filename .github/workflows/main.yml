@@ -11,17 +11,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.11
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          sudo apt-get install -y ffmpeg
+      - name: Install deps
+        run: pip install -r requirements.txt
 
-      - name: Run Bot
+      - name: Check ffmpeg
+        run: ffmpeg -version || echo "ffmpeg exists"
+
+      - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: python bot.py
