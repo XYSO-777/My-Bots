@@ -1,77 +1,71 @@
 import os
 import subprocess
-import logging
+import glob
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-logging.basicConfig(level=logging.INFO)
-
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-# -------- yt-dlp download function ----------
-def download_video(url: str):
+def normalize_url(url):
+    if "shorts/" in url:
+        vid = url.split("shorts/")[1].split("?")[0]
+        return f"https://youtube.com/watch?v={vid}"
+    return url
+
+
+def download_video(url):
+    url = normalize_url(url)
+
     output = f"{DOWNLOAD_DIR}/%(title)s.%(ext)s"
 
-    # First try Bangla
-    cmd_bn = [
+    cmd = [
         "yt-dlp",
-        "-f", "bv+ba[language=bn]/best",
+        "-f", "bv[height<=720]+ba[language=bn]/bv[height<=720]+ba/best[height<=720]",
         "-o", output,
         url
     ]
 
-    result = subprocess.run(cmd_bn)
+    subprocess.run(cmd, check=True)
 
-    # If fail → fallback
-    if result.returncode != 0:
-        cmd_default = [
-            "yt-dlp",
-            "-f", "best",
-            "-o", output,
-            url
-        ]
-        subprocess.run(cmd_default)
-
-    # return latest file
-    files = sorted(
-        [os.path.join(DOWNLOAD_DIR, f) for f in os.listdir(DOWNLOAD_DIR)],
-        key=os.path.getmtime
-    )
-
-    return files[-1]
+    files = glob.glob(f"{DOWNLOAD_DIR}/*")
+    return max(files, key=os.path.getctime)
 
 
-# -------- Telegram command ----------
 async def yturl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if not context.args:
-            await update.message.reply_text("❌ Usage:\n/yturl VIDEO_LINK")
+            await update.message.reply_text("Usage:\n/yturl link")
             return
-
-        url = context.args[0]
 
         msg = await update.message.reply_text("⏳ Downloading...")
 
-        filepath = download_video(url)
+        filepath = download_video(context.args[0])
+
+        size = os.path.getsize(filepath) / (1024 * 1024)
+
+        if size > 49:
+            await msg.edit_text(f"❌ File too large ({size:.1f}MB)\nTelegram limit 50MB")
+            os.remove(filepath)
+            return
 
         await msg.edit_text("📤 Uploading...")
 
-        await update.message.reply_video(video=open(filepath, "rb"))
+        await update.message.reply_video(open(filepath, "rb"))
 
         os.remove(filepath)
 
+    except subprocess.CalledProcessError:
+        await update.message.reply_text("❌ Download failed (format/audio not found)")
     except Exception as e:
-        logging.error(e)
-        await update.message.reply_text("❌ Error occurred!")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
-# -------- Start bot ----------
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("yturl", yturl))
 
-print("Bot Running...")
+print("Bot running...")
 app.run_polling()
